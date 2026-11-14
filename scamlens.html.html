@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ScamLens: a scam filter you can teach</title>
+<style>
+:root{--bg:#f3f5f2;--ink:#17201b;--mute:#5b6a61;--card:#fff;--line:#d5ddd7;--scam:#c8372d;--safe:#1f7a4d;--acc:#17201b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101613;--ink:#e6efe9;--mute:#93a49a;--card:#18211c;--line:#2b3a32;--scam:#ff6b5e;--safe:#4fd08a;--acc:#e6efe9}}
+:root[data-theme="dark"]{--bg:#101613;--ink:#e6efe9;--mute:#93a49a;--card:#18211c;--line:#2b3a32;--scam:#ff6b5e;--safe:#4fd08a;--acc:#e6efe9}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Georgia,"Iowan Old Style",serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
+h1{font:800 clamp(30px,8vw,46px)/1.05 "Trebuchet MS",Verdana,sans-serif;letter-spacing:-.02em;margin:8px 0 6px}
+h2{font:700 15px "Trebuchet MS",Verdana,sans-serif;margin:0 0 8px}
+.lede{color:var(--mute);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+textarea{width:100%;min-height:110px;resize:vertical;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,serif}
+textarea:focus,button:focus-visible{outline:3px solid var(--safe);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+button{font:600 14px "Trebuchet MS",Verdana,sans-serif;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:8px 12px;cursor:pointer}
+button.solid{background:var(--acc);color:var(--bg);border-color:var(--acc)}
+.verdict{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.pct{font:800 44px/1 "Trebuchet MS",Verdana,sans-serif}
+.lbl{font:700 18px "Trebuchet MS",Verdana,sans-serif}
+.meter{height:14px;border-radius:7px;background:linear-gradient(90deg,var(--safe),var(--line) 50%,var(--scam));position:relative;margin:12px 0 4px}
+.pin{position:absolute;top:-5px;width:6px;height:24px;border-radius:3px;background:var(--ink);transform:translateX(-3px);transition:left .35s}
+.scale{display:flex;justify-content:space-between;font-size:13px;color:var(--mute)}
+.hl{line-height:2;word-break:break-word;white-space:pre-wrap}
+.hl span{border-radius:4px;padding:1px 0}
+.sig{display:grid;grid-template-columns:110px 1fr 54px;gap:8px;align-items:center;font-size:14px;margin:5px 0}
+.bar{height:10px;border-radius:5px;background:var(--line);position:relative}
+.bar i{position:absolute;top:0;bottom:0;border-radius:5px}
+.sig b{overflow:hidden;text-overflow:ellipsis}.sig em{font-style:normal;color:var(--mute);text-align:right}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stats div{background:var(--bg);border-radius:10px;padding:10px 4px}
+.stats strong{display:block;font:800 24px "Trebuchet MS",Verdana,sans-serif}
+.stats span{font-size:13px;color:var(--mute)}
+small,.note{color:var(--mute);font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>ScamLens</h1>
+<p class="lede">Paste a text message. A small AI model that trains itself in your browser tells you how scammy it looks, and shows exactly which words convinced it. Disagree? Teach it and watch it change its mind.</p>
+
+<div class="card">
+<h2>Message to check</h2>
+<textarea id="msg" placeholder="Paste or type a text message here…" aria-label="Message to check"></textarea>
+<div class="chips" id="chips"></div>
+</div>
+
+<div class="card" id="result">
+<div class="verdict"><span class="pct" id="pct">–</span><span class="lbl" id="lbl">Waiting for a message</span></div>
+<div class="meter"><div class="pin" id="pin" style="left:50%"></div></div>
+<div class="scale"><span>Looks safe</span><span>Looks like a scam</span></div>
+<p class="hl" id="hl"></p>
+<div id="sigs"></div>
+<div class="row" id="teach" hidden>
+<button id="tScam" class="solid">Teach: this is a scam</button>
+<button id="tSafe">Teach: this is safe</button>
+</div>
+<p class="note" id="taught"></p>
+</div>
+
+<div class="card">
+<h2>How well does it work?</h2>
+<div class="stats">
+<div><strong id="acc">–</strong><span>accuracy</span></div>
+<div><strong id="prec">–</strong><span>precision</span></div>
+<div><strong id="rec">–</strong><span>recall</span></div>
+</div>
+<p class="note" id="evalnote"></p>
+</div>
+
+<div class="card">
+<h2>How it works</h2>
+<p>ScamLens uses a Naive Bayes classifier. While the page loads, it counts how often each word appears in scam and in normal messages. Every word then gets a score for how much more it appears in scams. Add the scores up, and you get the verdict. Red words push toward scam, green words push toward safe.</p>
+<p>Links, money amounts and numbers are replaced with placeholders so the model learns patterns, not specific values. Teaching it a message adds that message to its counts instantly.</p>
+<p><small>Limits: the model trains on 48 short messages we wrote ourselves (synthetic, no real people’s data), so it is a small prototype. Accuracy is measured on 16 messages held out from training and can swing a lot with so little data. This is not financial advice. Never rely on it alone to decide whether to send money or click a link.</small></p>
+</div>
+</main>
+<script>
+(function(){
+"use strict";
+var SCAM=[
+"URGENT: Your bank account is suspended. Verify now at http://secure-bank-login.xyz to avoid closure",
+"Congratulations! You won $1,000,000 in the lottery. Claim your prize now, reply with your details",
+"Your package could not be delivered. Pay a $2.99 fee at www.parcel-fix.top to reschedule",
+"FREE gift card! Click here to claim your $500 reward before it expires today",
+"Final notice: unpaid toll fee. Pay immediately at tollpay-now.com or face a fine",
+"Your account has been locked due to suspicious activity. Confirm your password here now",
+"You have been selected for a cash prize of $5,000. Send your bank details to receive it",
+"IRS alert: you owe back taxes. Pay today with gift cards to avoid arrest",
+"Act now! Limited offer, double your money in 24 hours with this crypto investment",
+"Dear customer, your card was blocked. Click the link to unlock and verify your PIN",
+"Winner! Claim your free iPhone now. Offer expires in 1 hour, click http://prize-win.top",
+"Your Netflix payment failed. Update your billing information immediately or lose access",
+"I am a prince and need your help moving $10 million. You will receive a share, send your account number",
+"Security warning: unusual sign in detected. Verify your identity at the link now",
+"Earn $500 per day working from home! No experience needed, message us to start today",
+"Congratulations, you qualify for a pre-approved loan of $20,000. No credit check, apply now",
+"Your refund of $349.00 is waiting. Confirm your card number to receive the money",
+"Last chance to claim your inheritance. Reply with your passport and bank details urgently",
+"Hot stock tip guaranteed 300% profit this week. Invest now before it is too late",
+"Your phone number won our weekly draw! Text back your address to claim the free prize",
+"Delivery fee unpaid. Your parcel will be returned unless you pay now at the link",
+"Dear user, your email storage is full. Click here to verify your account or it will be deleted",
+"Get rich fast with our secret trading bot. Send $250 deposit and we will triple it",
+"Immediate action required: your social security number has been suspended, call now",
+"Your account will be closed in 24 hours. Click the link below and enter your password",
+"You are our lucky visitor! Claim your free voucher worth $200, limited time only",
+"Bank notice: a payment of $900 was attempted. If this was not you, log in at this link now",
+"Exclusive crypto airdrop for you. Connect your wallet and share your seed phrase to claim",
+"Pay the customs fee of $45 today to release your package, send gift card codes by text",
+"Hello dear, I love you and need money for a plane ticket. Please wire $800 urgently",
+"Your tax refund is ready, verify your bank login to receive it, expires today",
+"Cheap meds no prescription, huge discount, order now at www.pharma-deals.info"];
+var SAFE=[
+"Hey, are we still meeting for lunch at 1 tomorrow?",
+"Your appointment is confirmed for Tuesday at 3 pm. Reply C to confirm or call us to reschedule",
+"Mom, I will be home late tonight, don’t wait up for dinner",
+"Your verification code is 482913. Do not share it with anyone",
+"Reminder: the team meeting moved to Thursday at 10 in room 204",
+"Thanks for dinner last night, it was great to catch up!",
+"Can you send me the notes from the chemistry class when you get a chance?",
+"Your order has shipped and should arrive Friday. Track it in the app you ordered from",
+"Happy birthday! Hope you have an amazing day, see you at the party on Saturday",
+"Don’t forget to bring your ID and the signed form to school on Monday",
+"The bus is running ten minutes late, I will text you when I am close",
+"Your electricity bill for this month is available in your account. Nothing is due until the 28th",
+"Did you finish the math homework? I got stuck on question five",
+"We are out of milk and eggs, can you pick some up on the way home?",
+"Hi, this is Dr. Rahman’s office. Your lab results are ready, please call us during office hours",
+"Practice is cancelled today because of the rain. Stay safe!",
+"Great job on the presentation today, the judges really liked your demo",
+"Can we move our call to 4 pm? I have a dentist appointment before",
+"Your library book is due next week. You can renew it online if you need more time",
+"I just landed, will grab a taxi and be at your place in about forty minutes",
+"Movie tonight? I heard the new one is really good",
+"Your table for four is booked for Friday at 7:30. Reply if you need to change the time",
+"Sorry I missed your call, I was in class. Can I ring you back in an hour?",
+"Reminder from your gym: the yoga class starts at 6 pm, bring your own mat",
+"Here is the address for the hackathon team meetup, see you at noon",
+"Thanks for the ride today, I owe you a coffee",
+"Your flight is on time and boarding starts at 9:15 at gate 12",
+"Grandma says dinner is ready, come over whenever you can",
+"Please remember to submit the project report by Sunday evening",
+"Your package was delivered to the front desk this afternoon",
+"Let’s study together after school, I will bring the notes",
+"The pharmacy has your prescription ready for pickup until Saturday"];
+
+var model,hold=[],taughtN=0,last="";
+function norm(s){return s.toLowerCase().replace(/https?:\/\/\S+|www\.\S+|\b[\w-]+\.(?:com|net|xyz|top|info|co)\b\S*/g," urltoken ").replace(/[$£€]\s?\d[\d,.]*/g," moneytoken ").replace(/\d+/g," numtoken ")}
+function toks(s){return norm(s).match(/[a-z]+/g)||[]}
+function newModel(){return{c:{scam:{},safe:{}},t:{scam:0,safe:0},d:{scam:0,safe:0},v:{}}}
+function learn(m,text,lab){var a=toks(text);m.d[lab]++;a.forEach(function(w){m.c[lab][w]=(m.c[lab][w]||0)+1;m.t[lab]++;m.v[w]=1})}
+function V(m){return Object.keys(m.v).length||1}
+function lo(m,w){if(!m.v[w])return 0;var v=V(m);return Math.log(((m.c.scam[w]||0)+1)/(m.t.scam+v))-Math.log(((m.c.safe[w]||0)+1)/(m.t.safe+v))}
+function score(m,text){var s=Math.log((m.d.scam+1)/(m.d.safe+1));toks(text).forEach(function(w){s+=lo(m,w)});return s}
+function prob(s){s=Math.max(-30,Math.min(30,s));return 1/(1+Math.exp(-s))}
+function init(){
+model=newModel();hold=[];
+SCAM.forEach(function(t,i){if(i%4===3)hold.push([t,1]);else learn(model,t,"scam")});
+SAFE.forEach(function(t,i){if(i%4===3)hold.push([t,0]);else learn(model,t,"safe")});
+}
+function evaluate(){
+var tp=0,fp=0,fn=0,tn=0;
+hold.forEach(function(h){var p=prob(score(model,h[0]))>=.5?1:0;if(p&&h[1])tp++;else if(p&&!h[1])fp++;else if(!p&&h[1])fn++;else tn++});
+var n=hold.length;
+function pc(x){return Math.round(x*100)+"%"}
+document.getElementById("acc").textContent=pc((tp+tn)/n);
+document.getElementById("prec").textContent=(tp+fp)?pc(tp/(tp+fp)):"n/a";
+document.getElementById("rec").textContent=(tp+fn)?pc(tp/(tp+fn)):"n/a";
+document.getElementById("evalnote").textContent="Tested on "+n+" held-out messages the model never trained on: "+tp+" scams caught, "+fn+" missed, "+fp+" false alarms, "+tn+" safe messages passed.";
+}
+function esc(s){return s.replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function analyze(){
+var text=document.getElementById("msg").value;last=text;
+var hl=document.getElementById("hl"),sigs=document.getElementById("sigs");
+if(!text.trim()){document.getElementById("pct").textContent="–";document.getElementById("lbl").textContent="Waiting for a message";document.getElementById("pin").style.left="50%";hl.innerHTML="";sigs.innerHTML="";document.getElementById("teach").hidden=true;return}
+var p=prob(score(model,text));
+var pct=Math.round(p*100);
+document.getElementById("pct").textContent=pct+"%";
+document.getElementById("pct").style.color=p>=.5?"var(--scam)":"var(--safe)";
+var lab=p>=.8?"Very likely a scam":p>=.55?"Looks suspicious":p>=.45?"Unclear, be careful":p>=.2?"Probably fine":"Looks safe";
+document.getElementById("lbl").textContent=lab;
+document.getElementById("pin").style.left=pct+"%";
+var parts=text.split(/(\s+)/),html="";
+parts.forEach(function(w){
+if(!w.trim()){html+=esc(w);return}
+var c=0;toks(w).forEach(function(t){c+=lo(model,t)});
+var a=Math.min(.55,Math.abs(c)/4);
+if(Math.abs(c)>=.4){html+='<span style="background:'+(c>0?"rgba(220,60,50,":"rgba(40,170,100,")+a.toFixed(2)+')">'+esc(w)+"</span>"}else html+=esc(w);
+});
+hl.innerHTML=html;
+var seen={},list=[];
+toks(text).forEach(function(t){if(!seen[t]&&model.v[t]){seen[t]=1;list.push([t,lo(model,t)])}});
+list.sort(function(a,b){return Math.abs(b[1])-Math.abs(a[1])});
+var top=list.slice(0,6),mx=Math.max.apply(null,top.map(function(x){return Math.abs(x[1])}).concat([1]));
+var sh="<h2>Strongest signals</h2>";
+if(!top.length)sh+='<p class="note">No words here are known to the model yet.</p>';
+top.forEach(function(x){var w=Math.abs(x[1])/mx*50,pos=x[1]>0;
+sh+='<div class="sig"><b>'+esc(x[0].replace("urltoken","[link]").replace("moneytoken","[money]").replace("numtoken","[number]"))+'</b><div class="bar"><i style="background:'+(pos?"var(--scam)":"var(--safe)")+";"+(pos?"left:50%;":"right:50%;")+"width:"+w+'%"></i></div><em>'+(pos?"+":"")+x[1].toFixed(1)+"</em></div>"});
+sigs.innerHTML=sh;
+document.getElementById("teach").hidden=false;
+}
+function teach(lab){
+if(!last.trim())return;
+learn(model,last,lab);taughtN++;
+document.getElementById("taught").textContent="Taught "+taughtN+" message"+(taughtN>1?"s":"")+" so far. The verdict above is now recalculated with what it learned.";
+analyze();evaluate();
+}
+var samples=[["Parcel scam","Your parcel is on hold. Pay a $1.99 fee at www.post-track.top today or it will be returned"],["Friend","Hey, can you bring the charger when you come over tonight?"],["Prize","Congratulations, you have won a free holiday! Claim now, reply with your bank details"],["School","Reminder: the science fair starts at 9 am on Friday in the main hall"],["Tricky","Your bank statement is ready to view in the app. No action needed."]];
+var chips=document.getElementById("chips");
+samples.forEach(function(s){var b=document.createElement("button");b.type="button";b.textContent=s[0];b.addEventListener("click",function(){document.getElementById("msg").value=s[1];analyze()});chips.appendChild(b)});
+document.getElementById("msg").addEventListener("input",analyze);
+document.getElementById("tScam").addEventListener("click",function(){teach("scam")});
+document.getElementById("tSafe").addEventListener("click",function(){teach("safe")});
+init();evaluate();
+})();
+</script>
+</body>
+</html>
